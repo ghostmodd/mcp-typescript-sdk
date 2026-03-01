@@ -18,6 +18,7 @@ import type {
     PromptArgument,
     PromptReference,
     ReadResourceResult,
+    RegisterWorkflowResourceOptions,
     Resource,
     ResourceTemplateReference,
     Result,
@@ -27,7 +28,9 @@ import type {
     ToolAnnotations,
     ToolExecution,
     Transport,
-    Variables
+    Variables,
+    WorkflowDefinition,
+    WorkflowSummary
 } from '@modelcontextprotocol/core';
 import {
     assertCompleteRequestPrompt,
@@ -35,13 +38,16 @@ import {
     getSchemaDescription,
     getSchemaShape,
     isOptionalSchema,
+    ListWorkflowsResultSchema,
     parseSchemaAsync,
     ProtocolError,
     ProtocolErrorCode,
     schemaToJson,
     unwrapOptionalSchema,
     UriTemplate,
-    validateAndWarnToolName
+    validateAndWarnToolName,
+    WorkflowDefinitionSchema,
+    WorkflowSummarySchema
 } from '@modelcontextprotocol/core';
 
 import type { ToolTaskHandler } from '../experimental/tasks/interfaces.js';
@@ -580,6 +586,99 @@ export class McpServer {
      * );
      * ```
      */
+    // here
+    private _workflowIndexRegistered = false;
+
+    private _ensureWorkflowIndexResourceRegistered(): void {
+        if (this._workflowIndexRegistered) return;
+
+        // Индекс регистрируем один раз; содержимое будет динамическим (смотрит в _registeredWorkflows)
+        this.registerResource(
+            'workflows-index',
+            this._workflowIndexUri,
+            {
+                title: 'Workflows index',
+                description: 'List of workflows available on this server',
+                mimeType: 'application/vnd.mcp.workflows-index+json',
+                _meta: { kind: 'mcp.workflows.index' }
+            },
+            async (): Promise<ReadResourceResult> => {
+                const workflows = Array.from(this._registeredWorkflows.values());
+
+                // Валидируем на всякий случай (чтобы не отдавать мусор)
+                const payload = ListWorkflowsResultSchema.parse({ workflows });
+
+                return {
+                    contents: [
+                        {
+                            uri: this._workflowIndexUri,
+                            mimeType: 'application/vnd.mcp.workflows-index+json',
+                            text: JSON.stringify(payload, null, 2)
+                        }
+                    ]
+                };
+            }
+        );
+
+        this._workflowIndexRegistered = true;
+    }
+
+    private _registeredWorkflows: Map<string, WorkflowSummary> = new Map();
+    private _workflowIndexUri: string = 'mcp://workflows';
+
+    registerWorkflowResource(workflow: WorkflowDefinition, options: RegisterWorkflowResourceOptions = {}): void {
+        const parsed = WorkflowDefinitionSchema.parse(workflow);
+        console.log("registerWorkflowResource called:", parsed.workflowId);
+
+        const resourceId = options.resourceId ?? parsed.workflowId;
+        const ns = options.namespace ?? 'workflows';
+        const uri = options.uri ?? `mcp://${ns}/${parsed.workflowId}`;
+        const mimeType = options.mimeType ?? 'application/vnd.mcp.workflow+json';
+
+        // 1) Регистрируем сам workflow как resource
+        const metadata: ResourceMetadata = {
+            title: options.title ?? `Workflow: ${parsed.workflowId}`,
+            description: options.description ?? 'Machine-readable workflow definition (JSON)',
+            mimeType,
+            _meta: {
+                kind: 'mcp.workflow',
+                workflowId: parsed.workflowId,
+                version: parsed.version,
+                schemaVersion: parsed.schemaVersion ?? 'mcp.workflow.v0'
+            }
+        };
+
+        this.registerResource(
+            resourceId,
+            uri,
+            metadata,
+            async (): Promise<ReadResourceResult> => ({
+                contents: [
+                    {
+                        uri,
+                        mimeType,
+                        text: JSON.stringify(parsed, null, 2)
+                    }
+                ]
+            })
+        );
+
+        // 2) Обновляем server-side registry для discovery индекса
+        const summary: WorkflowSummary = WorkflowSummarySchema.parse({
+            workflowId: parsed.workflowId,
+            version: parsed.version,
+            uri,
+            title: metadata.title,
+            description: metadata.description,
+            mimeType
+        });
+
+        this._registeredWorkflows.set(parsed.workflowId, summary);
+
+        // 3) Убеждаемся, что индекс-ресурс зарегистрирован
+        this._ensureWorkflowIndexResourceRegistered();
+    }
+
     registerResource(name: string, uriOrTemplate: string, config: ResourceMetadata, readCallback: ReadResourceCallback): RegisteredResource;
     registerResource(
         name: string,

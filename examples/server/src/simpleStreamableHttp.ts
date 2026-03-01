@@ -356,7 +356,7 @@ const getServer = () => {
             };
         }
     );
-
+    // тест регистрации источника
     // Create additional resources for ResourceLink demonstration
     server.registerResource(
         'example-file-1',
@@ -375,6 +375,91 @@ const getServer = () => {
                     }
                 ]
             };
+        }
+    );
+
+    // ... остальное как в примере
+    server.registerResource(
+        'tool-call-order',
+        'mcp://playbooks/tool-call-order',
+        {
+            title: 'Tool Call Order Playbook',
+            description: "Правила, в каком порядке вызывать tools, включая условный переход для имени 'Юлия'."
+        },
+        async (): Promise<ReadResourceResult> => {
+            return {
+                contents: [
+                    {
+                        uri: 'mcp://playbooks/tool-call-order',
+                        text: [
+                            '# Порядок вызова tools (playbook)',
+                            '',
+                            '## Tools',
+                            '- **greet** — Greeting Tool — A simple greeting tool',
+                            '- **collect-user-info-task** — Collect Info with Task — Collects user info via elicitation with task support using elicitInputStream',
+                            '- **multi-greet** — Multiple Greeting Tool — A tool that sends different greetings with delays between them',
+                            '',
+                            '## Основной сценарий (по умолчанию)',
+                            '1) Вызвать `greet`',
+                            '2) Затем `collect-user-info-task` (task-based, с elicitation)',
+                            '3) Затем `multi-greet`',
+                            '',
+                            '## Условный переход',
+                            'После выполнения `greet` проверь аргументы вызова:',
+                            '',
+                            '```json',
+                            '{ "name": "..." }',
+                            '```',
+                            '',
+                            '- Если `name === "Юлия"` → **пропусти** `collect-user-info-task` и **сразу** вызывай `multi-greet`.',
+                            '- Иначе → продолжай по основному сценарию.',
+                            '',
+                            '## Псевдокод (для агента)',
+                            '```ts',
+                            "await callTool('greet', { name })",
+                            "if (name === 'Юлия') {",
+                            "  await callTool('multi-greet', { name })",
+                            '} else {',
+                            "  await callToolTask('collect-user-info-task', {/* ... */})",
+                            "  await callTool('multi-greet', { name })",
+                            '}',
+                            '```',
+                            ''
+                        ].join('\n')
+                    }
+                ]
+            };
+        }
+    );
+
+    server.registerWorkflowResource(
+        {
+            schemaVersion: 'mcp.workflow.v0',
+            workflowId: 'tool-call-order',
+            version: '1',
+            entryStepId: 'step_greet',
+            policy: {
+                strict: true,
+                allowedTools: ['greet', 'collect-user-info-task', 'multi-greet']
+            },
+            steps: [
+                { id: 'step_greet', type: 'tool', toolId: 'greet', next: 'step_branch' },
+                {
+                    id: 'step_branch',
+                    type: 'branch',
+                    branches: [{ when: { toolId: 'greet', args: { name: 'Юлия' } }, next: 'step_multi' }],
+                    defaultNext: 'step_collect'
+                },
+                { id: 'step_collect', type: 'toolTask', toolId: 'collect-user-info-task', next: 'step_multi' },
+                { id: 'step_multi', type: 'tool', toolId: 'multi-greet', next: null }
+            ]
+        },
+        {
+            // можно оставить playbooks для совместимости, но тогда uri будет mcp://playbooks/tool-call-order
+            // лучше: namespace: "workflows"
+            namespace: 'workflows',
+            title: 'Tool Call Order Workflow',
+            description: 'Machine-readable workflow definition (JSON)'
         }
     );
 

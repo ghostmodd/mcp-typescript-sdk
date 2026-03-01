@@ -813,7 +813,7 @@ export const CancelTaskRequestSchema = RequestSchema.extend({
  * The response to a {@linkcode CancelTaskRequest | tasks/cancel} request.
  */
 export const CancelTaskResultSchema = ResultSchema.merge(TaskSchema);
-
+// !!!!
 /* Resources */
 /**
  * The contents of a specific resource or sub-resource.
@@ -1061,6 +1061,104 @@ export const ResourceUpdatedNotificationParamsSchema = NotificationsParamsSchema
 export const ResourceUpdatedNotificationSchema = NotificationSchema.extend({
     method: z.literal('notifications/resources/updated'),
     params: ResourceUpdatedNotificationParamsSchema
+});
+// !!!!
+/* Workflow */
+/**
+ * Workflow policy describes enforcement preferences for clients/agents.
+ */
+export const WorkflowPolicySchema = z.object({
+    /**
+     * If true, agent/client must follow step order strictly.
+     */
+    strict: z.boolean().default(true),
+
+    /**
+     * Allowlist of tool IDs that may be used within this workflow.
+     */
+    allowedTools: z.array(z.string()).min(1)
+});
+
+/**
+ * Branch condition: match based on the last tool call.
+ * v0 semantics: shallow match for args (key/value equality).
+ */
+export const WorkflowWhenSchema = z.object({
+  toolId: z.string(),
+  args: z.optional(z.record(z.string(), z.any())),
+});
+
+export const WorkflowBranchSchema = z.object({
+    when: WorkflowWhenSchema,
+    next: z.string()
+});
+
+export const WorkflowStepToolSchema = z.object({
+    id: z.string(),
+    type: z.literal('tool'),
+    toolId: z.string(),
+    next: z.nullable(z.string())
+});
+
+export const WorkflowStepToolTaskSchema = z.object({
+    id: z.string(),
+    type: z.literal('toolTask'),
+    toolId: z.string(),
+    next: z.nullable(z.string())
+});
+
+export const WorkflowStepBranchSchema = z.object({
+    id: z.string(),
+    type: z.literal('branch'),
+    branches: z.array(WorkflowBranchSchema).min(1),
+    defaultNext: z.string()
+});
+
+/**
+ * A workflow step (discriminated union by `type`).
+ */
+export const WorkflowStepSchema = z.discriminatedUnion('type', [
+    WorkflowStepToolSchema,
+    WorkflowStepToolTaskSchema,
+    WorkflowStepBranchSchema
+]);
+
+/**
+ * The workflow definition document.
+ * Published by server via resources/read, consumed by client runner.
+ */
+export const WorkflowDefinitionSchema = z.object({
+  schemaVersion: z.string().default("mcp.workflow.v0"),
+  workflowId: z.string(),
+  version: z.string().default("1"),
+  entryStepId: z.string(),
+  policy: WorkflowPolicySchema,
+  steps: z.array(WorkflowStepSchema).min(1),
+});
+
+export const RegisterWorkflowResourceOptionsSchema = z.object({
+  resourceId: z.string().optional(),
+  uri: z.string().optional(),
+  namespace: z.enum(["workflows", "playbooks"]).optional(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  mimeType: z.string().optional(), // default: application/vnd.mcp.workflow+json
+});
+
+/**
+ * Optional: publish workflows index (discovery), similar to resources/list result.
+ */
+export const WorkflowSummarySchema = z.object({
+    workflowId: z.string(),
+    version: z.string().default('1'),
+    uri: z.string(), // where to read this workflow (e.g. mcp://workflows/<id>)
+    title: z.optional(z.string()),
+    description: z.optional(z.string()),
+    mimeType: z.optional(z.string())
+});
+
+export const ListWorkflowsResultSchema = z.object({
+    workflows: z.array(WorkflowSummarySchema)
 });
 
 /* Prompts */
@@ -2493,6 +2591,24 @@ export type UnsubscribeRequestParams = Infer<typeof UnsubscribeRequestParamsSche
 export type UnsubscribeRequest = Infer<typeof UnsubscribeRequestSchema>;
 export type ResourceUpdatedNotificationParams = Infer<typeof ResourceUpdatedNotificationParamsSchema>;
 export type ResourceUpdatedNotification = Infer<typeof ResourceUpdatedNotificationSchema>;
+
+/* Workflows */
+// типы для раннера клиента
+// export type WorkflowPolicy = Infer<typeof WorkflowPolicySchema>;
+// export type WorkflowWhen = Infer<typeof WorkflowWhenSchema>;
+// export type WorkflowBranch = Infer<typeof WorkflowBranchSchema>;
+
+// на клиент аналогично
+// export type WorkflowStepTool = Infer<typeof WorkflowStepToolSchema>;
+// export type WorkflowStepToolTask = Infer<typeof WorkflowStepToolTaskSchema>;
+// export type WorkflowStepBranch = Infer<typeof WorkflowStepBranchSchema>;
+// export type WorkflowStep = Infer<typeof WorkflowStepSchema>;
+
+/* серверные типы */
+export type WorkflowDefinition = Infer<typeof WorkflowDefinitionSchema>;
+export type WorkflowSummary = Infer<typeof WorkflowSummarySchema>;
+export type ListWorkflowsResult = Infer<typeof ListWorkflowsResultSchema>;
+export type RegisterWorkflowResourceOptions = z.infer<typeof RegisterWorkflowResourceOptionsSchema>;
 
 /* Prompts */
 export type PromptArgument = Infer<typeof PromptArgumentSchema>;
