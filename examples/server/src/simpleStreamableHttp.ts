@@ -432,6 +432,9 @@ const getServer = () => {
         }
     );
 
+    // передавать не toolId а инстанс тулзы
+    // отказаться next и использовать индексацию в массиве
+    // не branches а conditions (оставим в типах, но обработка подождет) 
     server.registerWorkflowResource(
         {
             schemaVersion: 'mcp.workflow.v0',
