@@ -30,6 +30,7 @@ import type {
     Transport,
     Variables,
     WorkflowDefinition,
+    WorkflowStep,
     WorkflowSummary
 } from '@modelcontextprotocol/core';
 import {
@@ -592,7 +593,6 @@ export class McpServer {
     private _ensureWorkflowIndexResourceRegistered(): void {
         if (this._workflowIndexRegistered) return;
 
-        // Индекс регистрируем один раз; содержимое будет динамическим (смотрит в _registeredWorkflows)
         this.registerResource(
             'workflows-index',
             this._workflowIndexUri,
@@ -603,9 +603,8 @@ export class McpServer {
                 _meta: { kind: 'mcp.workflows.index' }
             },
             async (): Promise<ReadResourceResult> => {
-                const workflows = Array.from(this._registeredWorkflows.values());
+                const workflows = [...this._registeredWorkflows.values()];
 
-                // Валидируем на всякий случай (чтобы не отдавать мусор)
                 const payload = ListWorkflowsResultSchema.parse({ workflows });
 
                 return {
@@ -625,17 +624,67 @@ export class McpServer {
 
     private _registeredWorkflows: Map<string, WorkflowSummary> = new Map();
     private _workflowIndexUri: string = 'mcp://workflows';
+    private _validateWorkflowStep(index: number, step: WorkflowStep, allowedTools: Set<string> | null): void {
+        const registeredTool = this._registeredTools[step.toolId];
+
+        if (!registeredTool) {
+            throw new Error(`steps[${index}] references unknown ${step.type} "${step.toolId}"`);
+        }
+
+        const taskSupport = registeredTool.execution?.taskSupport;
+
+        switch (step.type) {
+            case 'tool': {
+                if (taskSupport === 'required') {
+                    throw new Error(`steps[${index}] references "${step.toolId}" as a tool, but it is registered as a toolTask`);
+                }
+                break;
+            }
+
+            case 'toolTask': {
+                if (taskSupport !== 'required') {
+                    throw new Error(`steps[${index}] references "${step.toolId}" as a toolTask, but it is not registered as task-capable`);
+                }
+                break;
+            }
+
+            default: {
+                throw new Error(`Unsupported workflow step type: ${(step as { type?: string }).type}`);
+            }
+        }
+
+        if (allowedTools && !allowedTools.has(step.toolId)) {
+            throw new Error(`steps[${index}] uses tool "${step.toolId}" which is not allowed by policy`);
+        }
+    }
+
+    private _validateLinearWorkflow(workflow: WorkflowDefinition): void {
+        if (workflow.steps.length === 0) {
+            throw new Error('Workflow must contain at least one step');
+        }
+
+        if (workflow.entryStepIndex < 0 || workflow.entryStepIndex >= workflow.steps.length) {
+            throw new Error(`Workflow entryStepIndex ${workflow.entryStepIndex} is out of bounds for ${workflow.steps.length} steps`);
+        }
+
+        const allowedTools = workflow.policy.allowedTools ? new Set(workflow.policy.allowedTools) : null;
+
+        for (const [index, step] of workflow.steps.entries()) {
+            this._validateWorkflowStep(index, step, allowedTools);
+        }
+    }
 
     registerWorkflowResource(workflow: WorkflowDefinition, options: RegisterWorkflowResourceOptions = {}): void {
         const parsed = WorkflowDefinitionSchema.parse(workflow);
-        console.log("registerWorkflowResource called:", parsed.workflowId);
+        this._validateLinearWorkflow(parsed);
 
-        const resourceId = options.resourceId ?? parsed.workflowId;
+        console.log('registerWorkflowResource called:', parsed.workflowId);
+
+        const resourceId = options.resourceId ?? `${parsed.workflowId}@${parsed.version}`;
         const ns = options.namespace ?? 'workflows';
-        const uri = options.uri ?? `mcp://${ns}/${parsed.workflowId}`;
+        const uri = options.uri ?? `mcp://${ns}/${parsed.workflowId}/versions/${parsed.version}`;
         const mimeType = options.mimeType ?? 'application/vnd.mcp.workflow+json';
 
-        // 1) Регистрируем сам workflow как resource
         const metadata: ResourceMetadata = {
             title: options.title ?? `Workflow: ${parsed.workflowId}`,
             description: options.description ?? 'Machine-readable workflow definition (JSON)',
@@ -644,7 +693,7 @@ export class McpServer {
                 kind: 'mcp.workflow',
                 workflowId: parsed.workflowId,
                 version: parsed.version,
-                schemaVersion: parsed.schemaVersion ?? 'mcp.workflow.v0'
+                schemaVersion: parsed.schemaVersion
             }
         };
 
@@ -663,7 +712,6 @@ export class McpServer {
             })
         );
 
-        // 2) Обновляем server-side registry для discovery индекса
         const summary: WorkflowSummary = WorkflowSummarySchema.parse({
             workflowId: parsed.workflowId,
             version: parsed.version,
@@ -673,9 +721,8 @@ export class McpServer {
             mimeType
         });
 
-        this._registeredWorkflows.set(parsed.workflowId, summary);
+        this._registeredWorkflows.set(`${parsed.workflowId}@${parsed.version}`, summary);
 
-        // 3) Убеждаемся, что индекс-ресурс зарегистрирован
         this._ensureWorkflowIndexResourceRegistered();
     }
 

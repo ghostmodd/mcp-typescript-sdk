@@ -34,7 +34,7 @@ import type {
     Tool,
     Transport,
     UnsubscribeRequest,
-    WorkflowDefinition,
+    WorkflowDefinition
 } from '@modelcontextprotocol/core';
 import {
     assertClientRequestTaskCapability,
@@ -829,10 +829,12 @@ export class Client extends Protocol<ClientContext> {
     async readWorkflow(params: { uri: string }, options?: RequestOptions): Promise<WorkflowDefinition> {
         const res = await this.readResource({ uri: params.uri }, options);
         console.log("workflows-index read");
-        // Expect first content part to be text JSON
         const first = res.contents?.[0];
-        const text = first?.text;
-        if (typeof text !== 'string') {
+        if (!first) {
+            throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Workflow resource ${params.uri} returned no contents`);
+        }
+
+        if (!('text' in first) || typeof first.text !== 'string') {
             throw new ProtocolError(
                 ProtocolErrorCode.InvalidParams,
                 `Workflow resource ${params.uri} did not return text JSON in contents[0].text`
@@ -841,7 +843,7 @@ export class Client extends Protocol<ClientContext> {
 
         let parsedJson: unknown;
         try {
-            parsedJson = JSON.parse(text);
+            parsedJson = JSON.parse(first.text);
         } catch (error) {
             throw new ProtocolError(
                 ProtocolErrorCode.InvalidParams,

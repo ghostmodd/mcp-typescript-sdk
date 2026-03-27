@@ -432,40 +432,6 @@ const getServer = () => {
         }
     );
 
-    // передавать не toolId а инстанс тулзы
-    // отказаться next и использовать индексацию в массиве
-    // не branches а conditions (оставим в типах, но обработка подождет) 
-    server.registerWorkflowResource(
-        {
-            schemaVersion: 'mcp.workflow.v0',
-            workflowId: 'tool-call-order',
-            version: '1',
-            entryStepId: 'step_greet',
-            policy: {
-                strict: true,
-                allowedTools: ['greet', 'collect-user-info-task', 'multi-greet']
-            },
-            steps: [
-                { id: 'step_greet', type: 'tool', toolId: 'greet', next: 'step_branch' },
-                {
-                    id: 'step_branch',
-                    type: 'branch',
-                    branches: [{ when: { toolId: 'greet', args: { name: 'Юлия' } }, next: 'step_multi' }],
-                    defaultNext: 'step_collect'
-                },
-                { id: 'step_collect', type: 'toolTask', toolId: 'collect-user-info-task', next: 'step_multi' },
-                { id: 'step_multi', type: 'tool', toolId: 'multi-greet', next: null }
-            ]
-        },
-        {
-            // можно оставить playbooks для совместимости, но тогда uri будет mcp://playbooks/tool-call-order
-            // лучше: namespace: "workflows"
-            namespace: 'workflows',
-            title: 'Tool Call Order Workflow',
-            description: 'Machine-readable workflow definition (JSON)'
-        }
-    );
-
     server.registerResource(
         'example-file-2',
         'file:///example/file2.txt',
@@ -688,6 +654,38 @@ const getServer = () => {
                 const result = await ctx.task.store.getTaskResult(ctx.task.id);
                 return result as CallToolResult;
             }
+        }
+    );
+
+    server.registerWorkflowResource(
+        {
+            schemaVersion: 'mcp.workflow.v0',
+            workflowId: 'tool-call-order',
+            version: '1',
+            entryStepIndex: 0,
+            policy: {
+                strict: true,
+                allowedTools: ['greet', 'collect-user-info-task', 'multi-greet']
+            },
+            steps: [
+                {
+                    toolId: 'greet',
+                    type: 'tool'
+                },
+                {
+                    toolId: 'collect-user-info-task',
+                    type: 'toolTask'
+                },
+                {
+                    toolId: 'multi-greet',
+                    type: 'tool'
+                }
+            ]
+        },
+        {
+            namespace: 'workflows',
+            title: 'Tool Call Order Workflow',
+            description: 'Machine-readable workflow definition (JSON)'
         }
     );
 
